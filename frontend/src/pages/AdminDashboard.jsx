@@ -1,0 +1,39 @@
+import { useCallback, useEffect, useState } from 'react'
+import { api } from '../lib/api'
+
+const eras=[['ERA_1_DOT_COM','Dot-Com Bubble Crash'],['ERA_2_CAPEX','Global Capex & Infra Boom'],['ERA_3_GFC','Lehman / GFC Crash'],['ERA_4_QE','Zero Rates & QE Boom'],['ERA_5_CRUDE','OPEC Oil Price War'],['ERA_6_DIGITAL','4G Mobile & EV Boom'],['ERA_7_COVID','COVID-19 Lockdowns'],['ERA_8_SUPPLY','Supply Chain Squeeze'],['ERA_9_AI','Generative AI Boom'],['ERA_10_YAPOO59','YAPOO 59 Blackout']]
+const money=n=>`₹${Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:2})}`
+export default function AdminDashboard(){
+ const [users,setUsers]=useState([]),[topups,setTopups]=useState([]),[audit,setAudit]=useState([]),[ranks,setRanks]=useState([]),[status,setStatus]=useState({}),[ticks,setTicks]=useState(true),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false)
+ const refresh=useCallback(async()=>{try{const [u,t,a,l,s]=await Promise.all([api('/admin/users/pending'),api('/admin/topups'),api('/admin/audit'),api('/admin/leaderboard'),fetch('/api/health').then(r=>r.json())]);setUsers(u);setTopups(t.filter(x=>x.status==='PENDING'));setAudit(a);setRanks(l);setStatus(s);setTicks(s.ticks)}catch(e){setNotice(e.message)}},[])
+ useEffect(()=>{refresh();const id=setInterval(refresh,10000);return()=>clearInterval(id)},[refresh])
+ const act=async(label,fn)=>{setBusy(true);setNotice('');try{const result=await fn();setNotice(label);if(result?.open!==undefined)setStatus(v=>({...v,market_open:result.open}));if(result?.ticks_enabled!==undefined)setTicks(result.ticks_enabled);await refresh()}catch(e){setNotice(e.message)}finally{setBusy(false)}}
+ const runEra=(id,name)=>{if(!window.confirm(`Apply ${name} across all 30 companies? This era can only run once.`))return;if(id==='ERA_10_YAPOO59'&&!window.confirm('Final confirmation: apply the YAPOO 59 market crash?'))return;act(`${name} applied.`,()=>api('/admin/scenario/trigger',{method:'POST',body:{scenario_id:id}}))}
+ const decision=async(path,label)=>act(label,()=>api(path,{method:'POST'}))
+ return <>
+  <div className="panel-head" style={{alignItems:'end'}}><div><div className="eyebrow">Organizer / operations</div><h1>Control room</h1><div className="subtle">Manage the market, event eras, participant access, and funding requests.</div></div><div className="status-pill"><span className={`dot ${status.market_open?'':'off'}`} />{status.market_open?'Market open':'Market paused'}</div></div>
+  {notice&&<div className="notice">{notice}<button className="btn small" style={{float:'right'}} onClick={()=>setNotice('')}>Dismiss</button></div>}
+  <div className="metric-grid"><Metric label="Active market" value={status.market_open?'OPEN':'PAUSED'} foot={status.ticks?'Background ticks enabled':'Background ticks paused'} /><Metric label="Pending participants" value={users.length} foot="Waiting for account approval" /><Metric label="Top-up requests" value={topups.length} foot="₹5,000 per approval" /><Metric label="Live participants" value={ranks.length} foot="Included in current leaderboard" /></div>
+  <div className="admin-grid">
+   <section className="card panel"><div className="eyebrow">Macro control</div><h2 style={{margin:'6px 0 15px'}}>Trigger a market era</h2><div className="era-grid">{eras.map(([id,name],i)=><button key={id} className={`era ${i===9?'final':''}`} disabled={busy} onClick={()=>runEra(id,name)}><span><b>ERA {i+1}</b><div className="muted" style={{fontSize:10,marginTop:4}}>{name}</div></span><span>↗</span></button>)}</div><p className="subtle" style={{fontSize:10,margin:'12px 0 0'}}>Each era is a one-time trigger and updates all company prices atomically.</p></section>
+   <section className="card panel"><div className="eyebrow">Market controls</div><h2 style={{margin:'6px 0 15px'}}>Live switches</h2><div style={{display:'grid',gap:9}}>
+    <Control title={status.market_open?'Pause trading':'Open trading'} detail="Participant orders are accepted only while open." onClick={()=>act('Market state updated.',()=>api('/admin/market/pause',{method:'PATCH'}))} disabled={busy} />
+    <Control title={ticks?'Disable price ticks':'Enable price ticks'} detail="Pause or resume in-memory market movement." onClick={()=>act('Tick setting updated.',async()=>{const r=await api('/admin/ticks/toggle',{method:'PATCH'});return r})} disabled={busy} />
+    <Control title="Freeze leaderboard" detail="Keep the participant view on a final ranking snapshot." onClick={()=>decision('/admin/leaderboard/freeze','Leaderboard frozen.')} disabled={busy} />
+    <Control title="Reveal live leaderboard" detail="Resume live participant rankings." onClick={()=>decision('/admin/leaderboard/reveal','Live leaderboard restored.')} disabled={busy} />
+    <Control title="Reset prices to era anchors" detail="Restore each company to the last era reference price." onClick={()=>decision('/admin/prices/force-sync','Prices synchronized to the current era.')} disabled={busy} />
+   </div></section>
+   <Queue title="Participant approvals" empty="No participants are waiting for approval.">
+    {users.map(u=><div className="position-card card" key={u.id}><div><b>{u.full_name}</b><div className="subtle">{u.email} · {u.reg_number}</div></div><div style={{display:'flex',gap:6}}><button className="btn small primary" onClick={()=>decision(`/admin/users/${u.id}/approve`,`${u.full_name} approved.`)}>Approve</button><button className="btn small danger" onClick={()=>decision(`/admin/users/${u.id}/reject`,`${u.full_name} rejected.`)}>Reject</button></div></div>)}
+   </Queue>
+   <Queue title="₹5,000 top-up requests" empty="No pending top-up requests.">
+    {topups.map(t=><div className="position-card card" key={t.id}><div><b>{t.full_name}</b><div className="subtle">{t.email}</div></div><div style={{display:'flex',gap:6}}><button className="btn small primary" onClick={()=>decision(`/admin/topups/${t.id}/approve`,`₹5,000 credited to ${t.full_name}.`)}>Approve</button><button className="btn small danger" onClick={()=>decision(`/admin/topups/${t.id}/reject`,'Top-up request rejected.')}>Reject</button></div></div>)}
+   </Queue>
+   <section className="card panel"><div className="eyebrow">Ranking</div><h2 style={{margin:'6px 0 12px'}}>Live top five</h2>{ranks.slice(0,5).map(r=><div key={r.rank} style={{display:'flex',justifyContent:'space-between',padding:'9px 0',borderBottom:'1px solid #293832',fontSize:12}}><span><span className="tag">#{r.rank}</span> &nbsp;{r.name}</span><b className="mono">{money(r.net_worth)}</b></div>)}{!ranks.length&&<div className="empty">No active participant accounts yet.</div>}</section>
+   <section className="card panel"><div className="eyebrow">Audit trail</div><h2 style={{margin:'6px 0 12px'}}>Recent admin activity</h2>{audit.slice(0,8).map(x=><div key={x.id} style={{display:'flex',justifyContent:'space-between',gap:12,padding:'8px 0',borderBottom:'1px solid #293832',fontSize:11}}><span><b>{x.action}</b><div className="muted">{x.actor||'System'}</div></span><span className="muted">{new Date(x.created_at).toLocaleString()}</span></div>)}{!audit.length&&<div className="empty">Admin actions will appear here.</div>}</section>
+  </div>
+ </>
+}
+function Metric({label,value,foot}){return <div className="card metric"><div className="metric-label">{label}</div><div className="metric-value" style={{fontSize:21}}>{value}</div><div className="metric-foot">{foot}</div></div>}
+function Control({title,detail,onClick,disabled}){return <button className="era" style={{width:'100%'}} onClick={onClick} disabled={disabled}><span style={{textAlign:'left'}}><b>{title}</b><div className="muted" style={{fontSize:10,marginTop:4}}>{detail}</div></span><span>→</span></button>}
+function Queue({title,empty,children}){return <section className="card panel"><div className="eyebrow">Review queue</div><h2 style={{margin:'6px 0 12px'}}>{title}</h2>{children.length?children:<div className="empty">{empty}</div>}</section>}
