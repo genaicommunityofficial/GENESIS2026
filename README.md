@@ -425,6 +425,32 @@ Clients receive real-time JSON events on Port 443:
 
 ## Getting Started & Deployment
 
+### Backend contribution
+
+The repository now includes a runnable FastAPI backend under `backend/`. It provides
+the PRD's registration and approval flow, instant dealer-model trading, long and
+fully collateralized short positions, deterministic scenario triggers, portfolio
+valuation, admin market controls, leaderboard freeze, and a market WebSocket.
+
+The M5/M6 market work is implemented in `backend/market.py`: `MarketPort` isolates
+the engine from persistence, `MarketEngine` emits bounded in-memory price ticks,
+and `WebSocketHub` broadcasts `PRICE_TICK` events, sends heartbeats, and evicts
+stale clients. Clients can connect to `ws://127.0.0.1:8000/market/ticks`; the
+legacy `ws://127.0.0.1:8000/ws/market` path remains available as an alias.
+
+The local implementation uses an in-memory store so contributors can run the API
+without credentials. PostgreSQL can replace the store behind the same service
+methods when deployment wiring is added.
+
+```bash
+/usr/bin/python3 -m pip install -r requirements.txt
+/usr/bin/python3 -m uvicorn backend.main:app --reload
+/usr/bin/python3 -m pytest -q
+```
+
+The seeded local admin token is `admin-token`. Registering a participant returns a
+pending account; approve it with `PATCH /api/v1/admin/users/{user_id}/approve`.
+
 ### 1. Prerequisites
 - Docker Engine 24.0+ & Docker Compose
 - Python 3.11+
